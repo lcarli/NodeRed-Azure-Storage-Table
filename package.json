@@ -3,7 +3,7 @@
   "description": "Connector to Azure Table Storage on Node-Red",
   "version": "0.1.5",
   "engines": {
-    "node": ">=0.10.0"
+    "node": ">=4.4.6"
   },
      "dependencies" : { 
          "azure-storage" : "^1.0.0" 
