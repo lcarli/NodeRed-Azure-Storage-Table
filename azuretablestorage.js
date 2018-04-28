@@ -1,14 +1,15 @@
+'use strict';
+
 module.exports = function (RED) {
 
     var Client = require('azure-storage');
-    var globaltable = null;
     var clientTableService = null;
     var clientAccountName = "";
     var clientAccountKey = "";
     var node = null;
     var nodeConfig = null;
 
-    var entityClass = {};
+    var createdTables = {};
 
     var statusEnum = {
         disconnected: { color: "red", text: "Disconnected" },
@@ -21,103 +22,122 @@ module.exports = function (RED) {
         node.status({ fill: status.color, shape: "dot", text: status.text });
     }
 
-    var senddata = function () {
-            node.log('Saving data into Azure Table Storage :\n   data: ' + entityClass.partitionKey + " - " + entityClass.rowKey + " - " + entityClass.data + " - " + entityClass.tableName);
-            // Create a message and send it to the Azure Table Storage
-            var entGen = Client.TableUtilities.entityGenerator;
-            node.log('creating entity...');
-            var entity = {
-                PartitionKey: entGen.String(entityClass.partitionKey),
-                RowKey: entGen.String(entityClass.rowKey),
-                data: entGen.String(JSON.stringify(entityClass.data)),
-            };
-            node.log('entity created successfully');
-            clientTableService.insertEntity(entityClass.tableName, entity, function(err, result, response) {
-                node.log('trying to insert');
-                if (err) {
-                    node.error('Error while trying to save data:' + err.toString());
-                    setStatus(statusEnum.error);
-                } else {
-                    node.log('data saved.');
-                    setStatus(statusEnum.sent);
-                    node.send('data saved.');
-                }
-            });
+    var sendData = function (entityClass) {
+        node.log('Saving data into Azure Table Storage :\n   data: ' + entityClass.partitionKey + " - " + entityClass.rowKey + " - " + entityClass.data + " - " + entityClass.tableName);
+        // Create a message and send it to the Azure Table Storage
+        var entGen = Client.TableUtilities.entityGenerator;
+        node.log('creating entity...');
+        var entity = {
+            PartitionKey: entGen.String(entityClass.partitionKey),
+            RowKey: entGen.String(entityClass.rowKey)
         };
 
-    var readdata = function (table, pkey, rkey) {
-            node.log('Reading data from Azure Table Storage :\n   data: ' + entityClass.partitionKey + " - " + entityClass.rowKey);
-            clientTableService.retrieveEntity(entityClass.tableName, entityClass.partitionKey, entityClass.rowKey, function(err, result, response) {
-                if (err) {
-                    node.error('Error while trying to read data:' + err.toString());
-                    setStatus(statusEnum.error);
-                } else {
-                    node.log(result.data._);
-                    setStatus(statusEnum.sent);
-                    node.send(result.data._);
-                }
-            });
-         }
+        var jdata = null;
+        if (typeof (entityClass.data) != "string") {
+            jdata = entityClass.data;
+        } else {
+            jdata = { data: JSON.parse(entityClass.data) };
+        }
+
+        for (var key in jdata) {
+            if (typeof (jdata[key]) === 'boolean'){
+                entity[key] = entGen.Boolean(jdata[key]);
+            } else if (typeof (jdata[key]) === 'number'){
+                entity[key] = Math.floor(jdata[key]) === jdata[key] ? entGen.Int64(jdata[key]) : entGen.Double(jdata[key]);
+            } else {
+                entity[key] = entGen.String(jdata[key]);
+            }
+        }
+
+        node.log('entity created successfully');
+
+        clientTableService.insertEntity(entityClass.tableName, entity, function (err, result, response) {
+            node.log('trying to insert');
+            if (err) {
+                node.error('Error while trying to save data:' + err.toString());
+                setStatus(statusEnum.error);
+            } else {
+                node.log('data saved.');
+                setStatus(statusEnum.sent);
+                node.send('data saved.');
+            }
+        });
+    };
+
+    var readData = function (entityClass) {
+        node.log('Reading data from Azure Table Storage :\n   data: ' + entityClass.partitionKey + " - " + entityClass.rowKey);
+        clientTableService.retrieveEntity(entityClass.tableName, entityClass.partitionKey, entityClass.rowKey, function (err, result, response) {
+            if (err) {
+                node.error('Error while trying to read data:' + err.toString());
+                setStatus(statusEnum.error);
+            } else {
+                node.log(result.data._);
+                setStatus(statusEnum.sent);
+                node.send(result.data._);
+            }
+        });
+    }
 
     var deleteTable = function (table) {
         node.log("Deleting table");
         clientTableService.deleteTable(table, function (err) {
-             if (err) {
+            if (err) {
                 node.error('Error while trying to delete table:' + err.toString());
                 setStatus(statusEnum.error);
             } else {
                 node.log('table deleted');
                 setStatus(statusEnum.sent);
                 node.send('table deleted');
-            }   
+            }
         });
     }
 
-    var uptadeEntity = function () {
-            node.log('updating entity');
-            var entity = {
-                PartitionKey: entGen.String(entityClass.partitionKey),
-                RowKey: entGen.String(entityClass.rowKey),
-                data: entGen.String(entityClass.data),
-            };
-            clientTableService.insertOrReplaceEntity(entityClass.tableName, entity, function(err, result, response){
-                if (err) {
-                    node.error('Error while trying to update entity:' + err.toString());
-                    setStatus(statusEnum.error);
-                } else {
-                    node.log('entity updated');
-                    setStatus(statusEnum.sent);
-                    node.send('entity updated');
-                } 
-            });
-         }
+    var uptadeEntity = function (entityClass) {
+        node.log('updating entity');
+        var entity = {
+            PartitionKey: entGen.String(entityClass.partitionKey),
+            RowKey: entGen.String(entityClass.rowKey),
+            data: entGen.String(entityClass.data),
+        };
+        clientTableService.insertOrReplaceEntity(entityClass.tableName, entity, function (err, result, response) {
+            if (err) {
+                node.error('Error while trying to update entity:' + err.toString());
+                setStatus(statusEnum.error);
+            } else {
+                node.log('entity updated');
+                setStatus(statusEnum.sent);
+                node.send('entity updated');
+            }
+        });
+    }
 
-    var deleteEntity = function () {
-            node.log('deleting entity');
-            var entity = {
-                PartitionKey: entGen.String(entityClass.partitionKey),
-                RowKey: entGen.String(entityClass.rowKey),
-                data: entGen.String(entityClass.data),
-            };
-            clientTableService.deleteEntity(entityClass.tableName, entity, function(err, result, response){
-                if (err) {
-                    node.error('Error while trying to delete entity:' + err.toString());
-                    setStatus(statusEnum.error);
-                } else {
-                    node.log('entity deleted');
-                    setStatus(statusEnum.sent);
-                    node.send('entity deleted');
-                } 
-            }); 
-         }
+    var deleteEntity = function (entityClass) {
+        node.log('deleting entity');
+        var entity = {
+            PartitionKey: entGen.String(entityClass.partitionKey),
+            RowKey: entGen.String(entityClass.rowKey),
+            data: entGen.String(entityClass.data),
+        };
+        clientTableService.deleteEntity(entityClass.tableName, entity, function (err, result, response) {
+            if (err) {
+                node.error('Error while trying to delete entity:' + err.toString());
+                setStatus(statusEnum.error);
+            } else {
+                node.log('entity deleted');
+                setStatus(statusEnum.sent);
+                node.send('entity deleted');
+            }
+        });
+    }
 
 
-    var queryEntity = function (table, fromcolumn, where, selectdata) {
+    // This method appears to be not used at all
+    var queryEntity = function (table, fromcolumn, where, selectdata, entityClass) {
         node.log('query entity');
         var query = new Client.TableQuery()
             .top(1)
             .where(entityClass.fromcolumn + ' eq ?', entityClass.where);
-        clientTableService.queryEntities(entityClass.tableName, query, null, function(err, result, response){
+        clientTableService.queryEntities(entityClass.tableName, query, null, function (err, result, response) {
             if (err) {
                 node.error('Error while trying to query entity:' + err.toString());
                 setStatus(statusEnum.error);
@@ -125,34 +145,40 @@ module.exports = function (RED) {
                 //node.log(JSON.stringify(result.entries.data));
                 //setStatus(statusEnum.sent);
                 //node.send(result.entries.data._);
-            } 
+            }
         });
     }
 
-    var disconnectFrom = function () { 
-         if (clientTableService) { 
-             node.log('Disconnecting from Azure'); 
-             clientTableService.removeAllListeners(); 
-             clientTableService = null;
-             entityClass = {}; 
-             setStatus(statusEnum.disconnected); 
-         } 
-     } 
+    var disconnectFrom = function () {
+        if (clientTableService) {
+            node.log('Disconnecting from Azure');
+            clientTableService.removeAllListeners();
+            clientTableService = null;
+            setStatus(statusEnum.disconnected);
+        }
+    }
 
 
-    function createTable(callback) {
-        node.log('Creating a table if not exists');
-        var tableService = Client.createTableService(clientAccountName, clientAccountKey);
-        clientTableService = tableService;
-        tableService.createTableIfNotExists(entityClass.tableName, function(error, result, response) {
-        if (!error) {
-                // result contains true if created; false if already exists
-                globaltable = entityClass.tableName;
-                callback()
-         }
-         else {
-             node.error(error);
-         }
+    function ensureTable(entityClass, callback) {
+        var tableName = entityClass.tableName;
+        if (!createdTables[tableName]) {
+            createdTables[tableName] = new Promise(function (resolve, reject) {
+                node.log('Ensuring table ' + tableName + ' exists');
+                clientTableService.createTableIfNotExists(tableName, function (error, result, response) {
+                    if (!error) {
+                        // result contains true if created; false if already exists
+                        resolve();
+                    }
+                    else {
+                        node.error(error);
+                        reject();
+                    }
+                });
+            });
+        }
+
+        createdTables[tableName].then(function () {
+            callback(entityClass);
         });
     }
 
@@ -166,6 +192,8 @@ module.exports = function (RED) {
         RED.nodes.createNode(this, config);
         clientAccountName = node.credentials.accountname
         clientAccountKey = node.credentials.key;
+
+        clientTableService = Client.createTableService(clientAccountName, clientAccountKey);
 
         this.on('input', function (msg) {
 
@@ -181,8 +209,8 @@ module.exports = function (RED) {
                 messageJSON = JSON.parse(msg.payload);
             }
 
-            entityClass = messageJSON;
-            //var tableselect = createTable(messageJSON.tableName);
+            var entityClass = messageJSON;
+            //var tableselect = ensureTable(messageJSON.tableName);
             node.log('Received the input: ' + messageJSON.tableName);
             var action = messageJSON.action;
             // Sending data to Azure Table Storage
@@ -190,11 +218,11 @@ module.exports = function (RED) {
             switch (action) {
                 case "I":
                     node.log('Trying to insert entity');
-                    createTable(senddata);
+                    ensureTable(entityClass, sendData);
                     break;
                 case "R":
                     node.log('Trying to read entity');
-                    createTable(readdata);
+                    ensureTable(entityClass, readData);
                     break;
                 case "DT":
                     node.log('Trying to delete table');
@@ -202,22 +230,22 @@ module.exports = function (RED) {
                     break;
                 case "Q":
                     //node.log('Trying to query data');
-                    //queryEntity(messageJSON.tableName, messageJSON.fromColumn, messageJSON.where, messageJSON.selectData);
+                    //queryEntity(messageJSON.tableName, messageJSON.fromColumn, messageJSON.where, messageJSON.selectData, entityClass);
                     break;
                 case "U":
                     node.log('trying to update entity');
-                    createTable(uptadeEntity);
+                    ensureTable(entityClass, uptadeEntity);
                     break;
                 case "D":
                     node.log('trying to delete entity');
-                    createTable(deleteEntity);
+                    ensureTable(entityClass, deleteEntity);
                     break;
                 default:
                     node.log('action was not detected');
                     node.error('action was not detected');
                     setStatus(statusEnum.error);
                     break;
-            }    
+            }
         });
 
         this.on('close', function () {
@@ -235,7 +263,6 @@ module.exports = function (RED) {
             name: { value: "Azure Table Storage" },
         }
     });
-
 
     // Helper function to print results in the console
     function printResultFor(op) {
